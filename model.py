@@ -130,25 +130,23 @@ class GRASSEncoder(nn.Module):
             buffers.append(self.boxEncoder(b))
         symBuffers = [list(torch.split(b.squeeze(1), 1, 0)) for b in torch.split(symmetryStacks, 1, 1)]
         stacks = [[buf[0], buf[0]] for buf in buffers]
-        symStacks = [[buf[0], buf[0]] for buf in symBuffers]
         num_operations = operations.size(0)
         for i in range(num_operations):
             if operations is not None:
                 opt = operations[i]
             lefts, rights, features, syms = [], [], [], []
-            batch = zip(opt.data, buffers, stacks, symBuffers, symStacks)
-            for op, buf, stack, sBuf, sStack in batch:              
+            batch = zip(opt.data, buffers, stacks, symBuffers)
+            for op, buf, stack, sBuf in batch:              
                 if op == 0:
                     stack.append(buf.pop())
                 if op == 1:
                     stack.append(buf.pop())
-                    sStack.append(sBuf.pop())
                 if op == 2:
                     rights.append(stack.pop())
                     lefts.append(stack.pop())
                 if op == 3:
                     features.append(stack.pop())
-                    syms.append(sStack.pop())
+                    syms.append(sBuf.pop())
             
             if lefts:
                 reduced = iter(self.adjEncoder(lefts, rights))
