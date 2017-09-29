@@ -5,6 +5,17 @@ from torch.autograd import Variable
 
 import itertools
 
+def bundleComplete(input, num):
+    if input is None:
+        return None
+    a = input[0].size()[0]
+    b = input[0].size()[1]
+    if len(input) < num:
+        for i in range(num-len(input)):
+            input.append(Variable(torch.zeros(a,b)))
+    input = tuple(input)
+    return torch.unsqueeze(torch.cat(input, 0), 0)
+
 def bundle(input):
     if input is None:
         return None
@@ -14,7 +25,7 @@ def bundle(input):
 def unbundle(input):
     if input is None:
         return itertools.repeat(None)
-    return torch.split(input, 1, 0)
+    return list(torch.split(input, 1, 0))
 
 class BoxEncoder(nn.Module):
 
@@ -125,11 +136,12 @@ class GRASSEncoder(nn.Module):
     
     def forward(self, inputStacks, symmetryStacks, operations):
         buffers = []
-        boxes = [list(torch.split(b.squeeze(1), 1, 0)) for b in torch.split(inputStacks, 1, 1)]
+        boxes = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(inputStacks, 1, 0)]
         for b in boxes:
             buffers.append(self.boxEncoder(b))
-        symBuffers = [list(torch.split(b.squeeze(1), 1, 0)) for b in torch.split(symmetryStacks, 1, 1)]
-        stacks = [[buf[0], buf[0]] for buf in buffers]
+        symBuffers = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(symmetryStacks, 1, 0)]
+        stacks = [[] for buf in buffers]
+        operations = torch.t(operations.squeeze(1))
         num_operations = operations.size(0)
         for i in range(num_operations):
             if operations is not None:
@@ -140,26 +152,25 @@ class GRASSEncoder(nn.Module):
                 if op == 0:
                     stack.append(buf.pop())
                 if op == 1:
-                    stack.append(buf.pop())
-                if op == 2:
                     rights.append(stack.pop())
                     lefts.append(stack.pop())
-                if op == 3:
+                if op == 2:
                     features.append(stack.pop())
-                    syms.append(sBuf.pop())
+                    syms.append(sBuf.pop())                
             
             if lefts:
                 reduced = iter(self.adjEncoder(lefts, rights))
                 for op, stack in zip(opt.data, stacks):
-                    if op == 2:
+                    if op == 1:
                         stack.append(next(reduced))
             
             if features:
                 reduced = iter(self.symEncoder(features, syms))
                 for op, stack in zip(opt.data, stacks):
-                    if op == 3:
+                    if op == 2:
                         stack.append(next(reduced))
-        return bundle([stack.pop() for stack in stacks])[0]
+        
+        return bundle([stack.pop() for stack in stacks])
 
 class GRASSDecoder(nn.Module):
     def __init__(self, config):
@@ -167,34 +178,43 @@ class GRASSDecoder(nn.Module):
         self.boxDecoder = BoxDecoder(boxSize = config.boxSize, featureSize = config.featureSize)
         self.adjDecoder = AdjDecoder(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
         self.symDecoder = SymDecoder(featureSize = config.featureSize, symmetrySize = config.symmetrySize, hiddenSize = config.hiddenSize)
+        self.maxBoxes = config.maxBoxes
+        self.maxSyms = config.maxSyms
 
     def forward(self, inputStacks, operations):
-        features = [list(torch.split(b.squeeze(1), 1, 0)) for b in torch.split(inputStacks, 1, 1)]
+        features = [b for b in torch.split(inputStacks, 1, 0)]
         if operations is not None:
-            stacks = [[buf[0]] for buf in features]
+            stacks = [[buf] for buf in features]
             symStacks = [[] for buf in features]
+            operations = torch.t(operations.squeeze(1))
             num_operations = operations.size(0)
             for i in range(num_operations):
                 if operations is not None:
-                    opt = operations[i]
+                    opt = operations[num_operations - i - 1]
                 proximityD, symmetryD = [], []
                 batch = zip(opt.data, stacks)
                 for op, stack in batch:
-                    if op == 2:
+                    if op == 1:
                         proximityD.append(stack.pop())
-                    if op == 3:
+                    if op == 2:
                         symmetryD.append(stack.pop())
                 if proximityD:
-                    lefts, rights = iter(self.adjDecoder(proximityD))
+                    lefts, rights = self.adjDecoder(proximityD)
+                    count = 0
                     for op, stack in zip(opt.data, stacks):
-                        if op == 2:
-                            stack.append(next(lefts))
-                            stack.append(next(rights))
+                        if op == 1:
+                            stack.append(lefts[count])
+                            stack.append(rights[count])
+                            count = count + 1
                 if symmetryD:
-                    fs, ss = iter(self.symDecoder(symmetryD))
+                    ff, fs = self.symDecoder(symmetryD)
+                    count = 0
                     for op, stack, sStack in zip(opt.data, stacks, symStacks):
-                        if op == 3:
-                            stack.append(next(fs))
-                            sStack.append(next(ss))
-            stacks = self.boxDecoder(stacks)
-            return bundle(stacks), bundle(symStacks)
+                        if op == 2:
+                            stack.append(ff[count])
+                            sStack.append(ff[count])
+                            count = count + 1
+            for i in range(len(stacks)):
+                stacks[i] = bundleComplete(self.boxDecoder(stacks[i]), self.maxBoxes)
+                symStacks[i] = bundleComplete((symStacks[i]), self.maxSyms)
+            return torch.cat(stacks), torch.cat(symStacks)

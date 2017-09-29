@@ -5,27 +5,22 @@ from scipy.io import loadmat
 class GRASS(data.Dataset):
     def __init__(self, root, transform=None):
         self.root = root
-        self.data = loadmat(root)['data'][0]
+        o = torch.from_numpy(loadmat(root+'/ops.mat')['ops']).int()
+        b = torch.from_numpy(loadmat(root+'/boxes.mat')['boxes']).float()
+        s = torch.from_numpy(loadmat(root+'/syms.mat')['syms']).float()
+        l = o.size()[1]
+        self.opData = torch.chunk(o,l,1)
+        self.boxData = torch.chunk(b,l,1)
+        self.symData = torch.chunk(s,l,1)
         self.transform = transform
 
     def __getitem__(self, index):
 
-        boxes = torch.from_numpy(self.data[index]['boxes'][0][0]).float()
-        symshapes = torch.from_numpy(self.data[index]['symshapes'][0][0]).float()
-        treekids = torch.from_numpy(self.data[index]['treekids'][0][0]).int()
+        box = torch.t(self.boxData[index])
+        op = torch.t(self.opData[index])
+        sym = torch.t(self.symData[index])
 
-        s = treekids.size()
-        symparams = torch.zeros(s[0],8)
-        for ii in range(s[0]):
-            if  self.data[index]['symparams'][0][0][0][ii].shape[0] != 0:
-                symparams[ii,:] = torch.from_numpy(self.data[index]['symparams'][0][0][0][ii])
-
-        sample = {'boxes': boxes, 'symshapes': symshapes, 'treekids': treekids, 'symparams': symparams}
-
-        if self.transform:
-            sample = self.transform(sample)
-
-        return boxes,symshapes,treekids,symparams
+        return box, op, sym
 
     def __len__(self):
-        return len(self.data)
+        return len(self.opData)
