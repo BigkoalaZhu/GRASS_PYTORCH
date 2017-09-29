@@ -2,6 +2,7 @@ import math
 import torch
 from torch import nn
 from torch.autograd import Variable
+from time import time
 
 import itertools
 
@@ -12,7 +13,7 @@ def bundleComplete(input, num):
     b = input[0].size()[1]
     if len(input) < num:
         for i in range(num-len(input)):
-            input.append(Variable(torch.zeros(a,b)))
+            input.append(Variable(torch.zeros(a,b)).cuda())
     input = tuple(input)
     return torch.unsqueeze(torch.cat(input, 0), 0)
 
@@ -134,6 +135,11 @@ class GRASSEncoder(nn.Module):
         self.adjEncoder = AdjEncoder(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
         self.symEncoder = SymEncoder(featureSize = config.featureSize, symmetrySize = config.symmetrySize, hiddenSize = config.hiddenSize)
     
+    def make_cuda(self):
+        self.boxEncoder.cuda()
+        self.adjEncoder.cuda()
+        self.symEncoder.cuda()
+
     def forward(self, inputStacks, symmetryStacks, operations):
         buffers = []
         boxes = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(inputStacks, 1, 0)]
@@ -185,6 +191,7 @@ class GRASSDecoder(nn.Module):
         features = [b for b in torch.split(inputStacks, 1, 0)]
         if operations is not None:
             stacks = [[buf] for buf in features]
+            boxStacks = [[] for buf in features]
             symStacks = [[] for buf in features]
             operations = torch.t(operations.squeeze(1))
             num_operations = operations.size(0)
@@ -192,8 +199,10 @@ class GRASSDecoder(nn.Module):
                 if operations is not None:
                     opt = operations[num_operations - i - 1]
                 proximityD, symmetryD = [], []
-                batch = zip(opt.data, stacks)
-                for op, stack in batch:
+                batch = zip(opt.data, stacks, boxStacks)
+                for op, stack, bStack in batch:
+                    if op == 0:
+                        bStack.append(stack.pop())
                     if op == 1:
                         proximityD.append(stack.pop())
                     if op == 2:
@@ -212,9 +221,11 @@ class GRASSDecoder(nn.Module):
                     for op, stack, sStack in zip(opt.data, stacks, symStacks):
                         if op == 2:
                             stack.append(ff[count])
-                            sStack.append(ff[count])
+                            sStack.append(fs[count])
                             count = count + 1
-            for i in range(len(stacks)):
-                stacks[i] = bundleComplete(self.boxDecoder(stacks[i]), self.maxBoxes)
+            for i in range(len(boxStacks)):
+                boxStacks[i] = bundleComplete(self.boxDecoder(boxStacks[i]), self.maxBoxes)
                 symStacks[i] = bundleComplete((symStacks[i]), self.maxSyms)
-            return torch.cat(stacks), torch.cat(symStacks)
+            boxStacks.reverse()
+            symStacks.reverse()
+            return torch.cat(boxStacks), torch.cat(symStacks)
