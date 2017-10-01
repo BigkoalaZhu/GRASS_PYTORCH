@@ -26,7 +26,7 @@ def bundle(input):
 def unbundle(input):
     if input is None:
         return itertools.repeat(None)
-    return list(torch.split(input, 1, 0))
+    return torch.split(input, 1, 0)
 
 class BoxEncoder(nn.Module):
 
@@ -36,10 +36,11 @@ class BoxEncoder(nn.Module):
         self.tanh = nn.Tanh()
 
     def forward(self, boxes_in):
-        boxes = bundle(boxes_in)
-        boxes = self.encoder(boxes)
+        #boxes = bundle(boxes_in)
+        boxes = self.encoder(boxes_in)
         boxes = self.tanh(boxes)
-        return unbundle(boxes)
+        #return unbundle(boxes)
+        return boxes
 
 class AdjEncoder(nn.Module):
 
@@ -142,9 +143,8 @@ class GRASSEncoder(nn.Module):
 
     def forward(self, inputStacks, symmetryStacks, operations):
         buffers = []
-        boxes = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(inputStacks, 1, 0)]
-        for b in boxes:
-            buffers.append(self.boxEncoder(b))
+        encoded = self.boxEncoder(inputStacks)
+        buffers = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(encoded, 1, 0)]
         symBuffers = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(symmetryStacks, 1, 0)]
         stacks = [[] for buf in buffers]
         operations = torch.t(operations.squeeze(1))
@@ -154,6 +154,7 @@ class GRASSEncoder(nn.Module):
                 opt = operations[i]
             lefts, rights, features, syms = [], [], [], []
             batch = zip(opt.data, buffers, stacks, symBuffers)
+
             for op, buf, stack, sBuf in batch:              
                 if op == 0:
                     stack.append(buf.pop())
@@ -162,7 +163,7 @@ class GRASSEncoder(nn.Module):
                     lefts.append(stack.pop())
                 if op == 2:
                     features.append(stack.pop())
-                    syms.append(sBuf.pop())                
+                    syms.append(sBuf.pop())              
             
             if lefts:
                 reduced = iter(self.adjEncoder(lefts, rights))
@@ -175,7 +176,6 @@ class GRASSEncoder(nn.Module):
                 for op, stack in zip(opt.data, stacks):
                     if op == 2:
                         stack.append(next(reduced))
-        
         return bundle([stack.pop() for stack in stacks])
 
 class GRASSDecoder(nn.Module):

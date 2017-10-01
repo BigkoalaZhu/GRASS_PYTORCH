@@ -16,19 +16,15 @@ config = util.get_args()
 
 ddd = GRASS('data')
 dataloader = torch.utils.data.DataLoader(ddd, batch_size=128, shuffle=True)
-MSECriterion = nn.BCELoss()
 
 model = GRASSEncoder(config)
 model2 = GRASSDecoder(config)
 
-optimizer1 = torch.optim.Adam(model.parameters())
-optimizer2 = torch.optim.Adam(model2.parameters())
+optimizer1 = torch.optim.SGD(model.parameters(),lr=0.2)
+optimizer2 = torch.optim.SGD(model2.parameters(),lr=0.2)
 
-model.make_cuda()
+model.cuda()
 model2.cuda()
-MSECriterion.cuda()
-
-plt.ion()   # something about continuous plotting
 
 errs = []
 for epoch in range(10):
@@ -39,17 +35,17 @@ for epoch in range(10):
         
         aaa = model(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
 
-        bbb, ccc = model2(aaa, operations=data[1])
-        err = mse_loss(data[0],bbb,data[2],ccc)
+        #bbb, ccc = model2(aaa, operations=data[1])
+        #err = mse_loss(data[0],bbb,data[2],ccc)
         #err = MSECriterion(data[0], bbb)
-        model.zero_grad()
-        model2.zero_grad()
-        err.backward()
-        optimizer1.step()
-        optimizer2.step()
+        #model.zero_grad()
+        #model2.zero_grad()
+        #err.backward()
+        #optimizer1.step()
+        #optimizer2.step()
 
-        errs.append(err.data[0])
-        if i % 5 == 0 :
-            plt.plot(errs, c='#4AD631')
-            plt.draw()
-            plt.pause(0.01)
+        #errs.append(err.data[0])
+        #if i % 5 == 0 :
+        #    plt.plot(errs, c='#4AD631')
+        #    plt.draw()
+        #    plt.pause(0.01)
