@@ -28,6 +28,37 @@ def unbundle(input):
         return itertools.repeat(None)
     return list(torch.split(input, 1, 0))
 
+class Sampler(nn.Module):
+    def __init__(self, featureSize, hiddenSize):
+        super(Sampler, self).__init__()
+        self.mlp1 = nn.Linear(featureSize, hiddenSize)
+        self.mlp2mu = nn.Linear(hiddenSize, featureSize)
+        self.mlp2log = nn.Linear(hiddenSize, featureSize)
+        
+    def forward(self,input):
+        encode = self.mlp1(input)
+        mu = self.mlp2mu(encode)
+        logvar = self.mlp2log(encode)
+        
+        std = logvar.mul(0.5).exp_() #calculate the STDEV
+        #if opt.cuda:
+        #    eps = torch.cuda.FloatTensor(std.size()).normal_() #random normalized noise
+        #else:
+        eps = torch.FloatTensor(std.size()).normal_() #random normalized noise
+        eps = Variable(eps)
+        return eps.mul(std).add_(mu)
+
+class Desampler(nn.Module):
+    def __init__(self, featureSize, hiddenSize):
+        super(Desampler, self).__init__()
+        self.mlp1 = nn.Linear(featureSize, hiddenSize)
+        self.mlp2 = nn.Linear(hiddenSize, featureSize)
+        
+    def forward(self,input):
+        output = self.mlp1(input)
+        output = self.mlp2(output)
+        return output  
+
 class BoxEncoder(nn.Module):
 
     def __init__(self, boxSize, featureSize):
@@ -135,6 +166,7 @@ class GRASSEncoder(nn.Module):
         self.boxEncoder = BoxEncoder(boxSize = config.boxSize, featureSize = config.featureSize)
         self.adjEncoder = AdjEncoder(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
         self.symEncoder = SymEncoder(featureSize = config.featureSize, symmetrySize = config.symmetrySize, hiddenSize = config.hiddenSize)
+        self.sampler = Sampler(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
     
     def make_cuda(self):
         self.boxEncoder.cuda()
@@ -176,7 +208,7 @@ class GRASSEncoder(nn.Module):
                 for op, stack in zip(opt.data, stacks):
                     if op == 2:
                         stack.append(next(reduced))
-        return bundle([stack.pop() for stack in stacks])
+        return self.sampler(bundle([stack.pop() for stack in stacks]))
 
 class GRASSDecoder(nn.Module):
     def __init__(self, config):
@@ -184,11 +216,13 @@ class GRASSDecoder(nn.Module):
         self.boxDecoder = BoxDecoder(boxSize = config.boxSize, featureSize = config.featureSize)
         self.adjDecoder = AdjDecoder(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
         self.symDecoder = SymDecoder(featureSize = config.featureSize, symmetrySize = config.symmetrySize, hiddenSize = config.hiddenSize)
+        self.desampler = Desampler(featureSize = config.featureSize, hiddenSize = config.hiddenSize)
         self.maxBoxes = config.maxBoxes
         self.maxSyms = config.maxSyms
         self.symmetrySize = config.symmetrySize
 
     def wholeTree(self, inputStacks, operations):
+        inputStacks = self.desampler(inputStacks)
         features = [b for b in torch.split(inputStacks, 1, 0)]
         if operations is not None:
             stacks = [[buf] for buf in features]
@@ -260,15 +294,15 @@ class GRASSDecoder(nn.Module):
                     count = 0
                     for op, stack in zip(opt.data, stacks):
                         if op == 1:
-                            stack.append(lefts[count])
-                            stack.append(rights[count])
+                            stack.insert(0,lefts[count])
+                            stack.insert(0,rights[count])
                             count = count + 1
                 if symmetryD:
                     ff, fs = self.symDecoder(symmetryD)
                     count = 0
                     for op, stack, sStack in zip(opt.data, stacks, symStacks):
                         if op == 2:
-                            stack.append(ff[count])
+                            stack.insert(0,ff[count])
                             sStack.append(fs[count])
                             count = count + 1
             for i in range(len(boxStacks)):

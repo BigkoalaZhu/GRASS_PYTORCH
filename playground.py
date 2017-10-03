@@ -14,9 +14,8 @@ from math import sqrt
 
 def mse_loss(inputs, targets, weights):
     result = (inputs - targets)**2
-    result = result.sum(2)/inputs.size()[2]
+    result = result.sum(2)
     result = result.sum(1)*0.4
-    #result = result*weights.expand_as(result)
     result = result.sum(0)/inputs.size()[0]
     return result
 
@@ -72,8 +71,8 @@ model2 = GRASSDecoder(config)
 model.apply(encoder_weights_init)
 model2.apply(decoder_weights_init)
 
-optimizer1 = torch.optim.SGD(model.parameters(), lr=2e-2)
-optimizer2 = torch.optim.SGD(model2.parameters(), lr=2e-2)
+optimizer1 = torch.optim.SGD(model.parameters(), lr=5e-4)
+optimizer2 = torch.optim.SGD(model2.parameters(), lr=5e-4)
 
 #model.make_cuda()
 #model2.cuda()
@@ -100,13 +99,13 @@ for i, data in enumerate(dataloader):
 '''
 
 errs = []
-for epoch in range(15):
-    if epoch == 20:
+for epoch in range(100):
+    if epoch == 60:
         for param_group in optimizer1.param_groups:
             param_group['lr'] = param_group['lr']*0.33
         for param_group in optimizer2.param_groups:
             param_group['lr'] = param_group['lr']*0.33
-    if epoch == 40:
+    if epoch == 80:
         for param_group in optimizer1.param_groups:
             param_group['lr'] = param_group['lr']*0.33
         for param_group in optimizer2.param_groups:
@@ -119,7 +118,6 @@ for epoch in range(15):
         
         aaa = model(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
         bbb, ccc = model2(aaa, operations=data[1])
-        #err = MSECriterion(bbb, data[0])
         err = mse_loss(bbb, data[0], data[3])
         model.zero_grad()
         model2.zero_grad()
