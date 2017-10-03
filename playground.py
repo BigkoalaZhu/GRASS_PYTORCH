@@ -8,44 +8,130 @@ import torch.utils.data
 import util
 import matplotlib.pyplot as plt
 from time import time
+from draw3dOBB import tryPlot
+from draw3dOBB import showGenshape
+from math import sqrt
 
-def mse_loss(input1, target1, input2, target2):
-    return (torch.sum(torch.abs(input1 - target1))/36 + torch.sum(torch.abs(input2 - target2))/16)/input1.size()[0]
+def mse_loss(inputs, targets, weights):
+    result = (inputs - targets)**2
+    result = result.sum(2)/inputs.size()[2]
+    result = result.sum(1)*0.4
+    #result = result*weights.expand_as(result)
+    result = result.sum(0)/inputs.size()[0]
+    return result
+
+def encoder_weights_init(m):
+    r = sqrt(6)/sqrt(2*config.hiddenSize+1)
+    classname = m.__class__.__name__
+    if classname.find('BoxEncoder') != -1:
+        m.encoder.weight.data.uniform_(-r,r)
+        m.encoder.bias.data.fill_(0)
+    if classname.find('AdjEncoder') != -1:
+        m.left.weight.data.uniform_(-r,r)
+        m.left.bias.data.fill_(0)
+        m.right.weight.data.uniform_(-r,r)
+        m.second.weight.data.uniform_(-r,r)
+        m.second.bias.data.fill_(0)
+    if classname.find('SymEncoder') != -1:
+        m.left.weight.data.uniform_(-r,r)
+        m.left.bias.data.fill_(0)
+        m.right.weight.data.uniform_(-r,r)
+        m.right.bias.data.fill_(0)
+        m.second.weight.data.uniform_(-r,r)
+        m.second.bias.data.fill_(0)
+
+def decoder_weights_init(m):
+    r = sqrt(6)/sqrt(2*config.hiddenSize+1)
+    classname = m.__class__.__name__
+    if classname.find('BoxDecoder') != -1:
+        m.decode.weight.data.uniform_(-r,r)
+        m.decode.bias.data.fill_(0)
+    if classname.find('AdjDecoder') != -1:
+        m.left.weight.data.uniform_(-r,r)
+        m.left.bias.data.fill_(0)
+        m.right.weight.data.uniform_(-r,r)
+        m.right.bias.data.fill_(0)
+        m.decode.weight.data.uniform_(-r,r)
+        m.decode.bias.data.fill_(0)
+    if classname.find('SymDecoder') != -1:
+        m.left.weight.data.uniform_(-r,r)
+        m.left.bias.data.fill_(0)
+        m.right.weight.data.uniform_(-r,r)
+        m.right.bias.data.fill_(0)
+        m.decode.weight.data.uniform_(-r,r)
+        m.decode.bias.data.fill_(0)
 
 config = util.get_args()
 
 ddd = GRASS('data')
-dataloader = torch.utils.data.DataLoader(ddd, batch_size=128, shuffle=True)
+dataloader = torch.utils.data.DataLoader(ddd, batch_size=123, shuffle=True)
 
 model = GRASSEncoder(config)
 model2 = GRASSDecoder(config)
 
-optimizer1 = torch.optim.SGD(model.parameters(),lr=0.2)
-optimizer2 = torch.optim.SGD(model2.parameters(),lr=0.2)
+model.apply(encoder_weights_init)
+model2.apply(decoder_weights_init)
 
-model.cuda()
-model2.cuda()
+optimizer1 = torch.optim.SGD(model.parameters(), lr=2e-2)
+optimizer2 = torch.optim.SGD(model2.parameters(), lr=2e-2)
+
+#model.make_cuda()
+#model2.cuda()
+
+MSECriterion = nn.MSELoss()
+
+'''
+encoder = torch.load('encoder.pkl')
+decoder = torch.load('decoder.pkl')
+
+for i, data in enumerate(dataloader):
+        data[0] = Variable(data[0])
+        data[1] = Variable(data[1])
+        data[2] = Variable(data[2])
+
+        ds = torch.split(data[0], 1, 0)
+        showGenshape(ds[0].squeeze(0).data.cpu().numpy())
+        
+        aaa = encoder(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
+        bbb, ccc = decoder(aaa, operations=data[1])
+
+        ds = torch.split(bbb, 1, 0)
+        showGenshape(ds[0].squeeze(0).data.cpu().numpy())
+'''
 
 errs = []
-for epoch in range(10):
+for epoch in range(15):
+    if epoch == 20:
+        for param_group in optimizer1.param_groups:
+            param_group['lr'] = param_group['lr']*0.33
+        for param_group in optimizer2.param_groups:
+            param_group['lr'] = param_group['lr']*0.33
+    if epoch == 40:
+        for param_group in optimizer1.param_groups:
+            param_group['lr'] = param_group['lr']*0.33
+        for param_group in optimizer2.param_groups:
+            param_group['lr'] = param_group['lr']*0.33
     for i, data in enumerate(dataloader):
-        data[0] = Variable(data[0], requires_grad = True).cuda()
-        data[1] = Variable(data[1], requires_grad = True).cuda()
-        data[2] = Variable(data[2], requires_grad = True).cuda()
+        data[0] = Variable(data[0])
+        data[1] = Variable(data[1])
+        data[2] = Variable(data[2])
+        data[3] = Variable(data[3]).squeeze(1).squeeze(1)
         
         aaa = model(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
+        bbb, ccc = model2(aaa, operations=data[1])
+        #err = MSECriterion(bbb, data[0])
+        err = mse_loss(bbb, data[0], data[3])
+        model.zero_grad()
+        model2.zero_grad()
+        err.backward()
+        optimizer1.step()
+        optimizer2.step()
 
-        #bbb, ccc = model2(aaa, operations=data[1])
-        #err = mse_loss(data[0],bbb,data[2],ccc)
-        #err = MSECriterion(data[0], bbb)
-        #model.zero_grad()
-        #model2.zero_grad()
-        #err.backward()
-        #optimizer1.step()
-        #optimizer2.step()
+        errs.append(err.data[0])
+        if i % 5 == 0 :
+            plt.plot(errs, c='#4AD631')
+            plt.draw()
+            plt.pause(0.01)
 
-        #errs.append(err.data[0])
-        #if i % 5 == 0 :
-        #    plt.plot(errs, c='#4AD631')
-        #    plt.draw()
-        #    plt.pause(0.01)
+torch.save(model, 'encoder.pkl')
+torch.save(model2, 'decoder.pkl')

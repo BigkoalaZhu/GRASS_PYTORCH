@@ -13,7 +13,7 @@ def bundleComplete(input, num):
     b = input[0].size()[1]
     if len(input) < num:
         for i in range(num-len(input)):
-            input.append(Variable(torch.zeros(a,b)).cuda())
+            input.append(Variable(torch.zeros(a,b)))
     input = tuple(input)
     return torch.unsqueeze(torch.cat(input, 0), 0)
 
@@ -26,7 +26,7 @@ def bundle(input):
 def unbundle(input):
     if input is None:
         return itertools.repeat(None)
-    return torch.split(input, 1, 0)
+    return list(torch.split(input, 1, 0))
 
 class BoxEncoder(nn.Module):
 
@@ -186,7 +186,55 @@ class GRASSDecoder(nn.Module):
         self.symDecoder = SymDecoder(featureSize = config.featureSize, symmetrySize = config.symmetrySize, hiddenSize = config.hiddenSize)
         self.maxBoxes = config.maxBoxes
         self.maxSyms = config.maxSyms
+        self.symmetrySize = config.symmetrySize
 
+    def wholeTree(self, inputStacks, operations):
+        features = [b for b in torch.split(inputStacks, 1, 0)]
+        if operations is not None:
+            stacks = [[buf] for buf in features]
+            boxStacks = [[] for buf in features]
+            symStacks = [[] for buf in features]
+            wholeSymStacks = [[] for buf in features]
+            operations = torch.t(operations.squeeze(1))
+            num_operations = operations.size(0)
+            for i in range(num_operations):
+                if operations is not None:
+                    opt = operations[num_operations - i - 1]
+                proximityD, symmetryD = [], []
+                batch = zip(opt.data, stacks, boxStacks)
+                for op, stack, bStack in batch:
+                    if op == 0:
+                        bStack.append(stack.pop())
+                    if op == 1:
+                        proximityD.append(stack.pop())
+                    if op == 2:
+                        symmetryD.append(stack.pop())
+                if proximityD:
+                    lefts, rights = self.adjDecoder(proximityD)
+                    count = 0
+                    for op, stack, wss in zip(opt.data, stacks, wholeSymStacks):
+                        if op == 1:
+                            stack.append(lefts[count])
+                            stack.append(rights[count])
+                            if len(wss) == 0:
+                                wss.append(Variable(torch.zeros(self.symmetrySize).cuda()))
+                                wss.append(Variable(torch.zeros(self.symmetrySize).cuda()))
+                            else:
+                                wss.append(wss[len(wss)-1])
+                                wss.append(wss[len(wss)-1])
+                            count = count + 1
+                if symmetryD:
+                    ff, fs = self.symDecoder(symmetryD)
+                    count = 0
+                    for op, stack, sStack, wss in zip(opt.data, stacks, symStacks, wholeSymStacks):
+                        if op == 2:
+                            stack.append(ff[count])
+                            sStack.append(fs[count])
+                            wss.append(fs[count].squeeze(0))
+                            count = count + 1
+            
+            return torch.cat(boxStacks), torch.cat(symStacks)
+        
     def forward(self, inputStacks, operations):
         features = [b for b in torch.split(inputStacks, 1, 0)]
         if operations is not None:
@@ -224,8 +272,8 @@ class GRASSDecoder(nn.Module):
                             sStack.append(fs[count])
                             count = count + 1
             for i in range(len(boxStacks)):
+                boxStacks[i].reverse()
+                symStacks[i].reverse()
                 boxStacks[i] = bundleComplete(self.boxDecoder(boxStacks[i]), self.maxBoxes)
                 symStacks[i] = bundleComplete((symStacks[i]), self.maxSyms)
-            boxStacks.reverse()
-            symStacks.reverse()
             return torch.cat(boxStacks), torch.cat(symStacks)
