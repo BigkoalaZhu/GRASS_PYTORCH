@@ -181,6 +181,11 @@ class GRASSEncoder(nn.Module):
         stacks = [[] for buf in buffers]
         operations = torch.t(operations.squeeze(1))
         num_operations = operations.size(0)
+
+        for i in range(len(buffers)):
+            buffers[i].reverse()
+            symBuffers[i].reverse()
+
         for i in range(num_operations):
             if operations is not None:
                 opt = operations[i]
@@ -208,7 +213,8 @@ class GRASSEncoder(nn.Module):
                 for op, stack in zip(opt.data, stacks):
                     if op == 2:
                         stack.append(next(reduced))
-        return self.sampler(bundle([stack.pop() for stack in stacks]))
+        #return self.sampler(bundle([stack.pop() for stack in stacks]))
+        return bundle([stack.pop() for stack in stacks])
 
 class GRASSDecoder(nn.Module):
     def __init__(self, config):
@@ -270,6 +276,7 @@ class GRASSDecoder(nn.Module):
             return torch.cat(boxStacks), torch.cat(symStacks)
         
     def forward(self, inputStacks, operations):
+        #inputStacks = self.desampler(inputStacks)
         features = [b for b in torch.split(inputStacks, 1, 0)]
         if operations is not None:
             stacks = [[buf] for buf in features]
@@ -308,6 +315,8 @@ class GRASSDecoder(nn.Module):
             for i in range(len(boxStacks)):
                 boxStacks[i].reverse()
                 symStacks[i].reverse()
-                boxStacks[i] = bundleComplete(self.boxDecoder(boxStacks[i]), self.maxBoxes)
-                symStacks[i] = bundleComplete((symStacks[i]), self.maxSyms)
-            return torch.cat(boxStacks), torch.cat(symStacks)
+                boxStacks[i] = self.boxDecoder(boxStacks[i])
+                #boxStacks[i] = bundleComplete(self.boxDecoder(boxStacks[i]), self.maxBoxes)
+                #symStacks[i] = bundleComplete((symStacks[i]), self.maxSyms)
+            return boxStacks, symStacks
+            #return torch.cat(boxStacks), torch.cat(symStacks)

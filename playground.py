@@ -19,6 +19,24 @@ def mse_loss(inputs, targets, weights):
     result = result.sum(0)/inputs.size()[0]
     return result
 
+def mse_list_loss(inputs, targets, inSym, outSym):
+    err_sum = 0
+    target_list = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(targets, 1, 0)]
+    for i in range(len(inputs)):
+        for j in range(len(inputs[i])):
+            err_sum = err_sum + torch.sum((inputs[i][j] - target_list[i][j])**2)
+    err_sum = err_sum/len(inputs)*0.4
+    return err_sum
+'''
+    sym_sum = 0
+    sym_list = [list(torch.split(b.squeeze(0), 1, 0)) for b in torch.split(outSym, 1, 0)]
+    for i in range(len(inSym)):
+        for j in range(len(inSym[i])):
+            sym_sum = sym_sum + torch.sum((inSym[i][j] - outSym[i][j])**2)
+    sym_sum = sym_sum/len(inputs)*0.5
+    return err_sum+sym_sum
+'''
+
 def encoder_weights_init(m):
     r = sqrt(6)/sqrt(2*config.hiddenSize+1)
     classname = m.__class__.__name__
@@ -71,15 +89,15 @@ model2 = GRASSDecoder(config)
 model.apply(encoder_weights_init)
 model2.apply(decoder_weights_init)
 
-optimizer1 = torch.optim.SGD(model.parameters(), lr=5e-4)
-optimizer2 = torch.optim.SGD(model2.parameters(), lr=5e-4)
+optimizer1 = torch.optim.SGD(model.parameters(), lr=3e-2)
+optimizer2 = torch.optim.SGD(model2.parameters(), lr=3e-2)
 
 #model.make_cuda()
 #model2.cuda()
 
 MSECriterion = nn.MSELoss()
 
-'''
+
 encoder = torch.load('encoder.pkl')
 decoder = torch.load('decoder.pkl')
 
@@ -94,9 +112,9 @@ for i, data in enumerate(dataloader):
         aaa = encoder(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
         bbb, ccc = decoder(aaa, operations=data[1])
 
-        ds = torch.split(bbb, 1, 0)
-        showGenshape(ds[0].squeeze(0).data.cpu().numpy())
-'''
+        #ds = torch.split(bbb, 1, 0)
+        showGenshape(torch.cat(bbb[0],0).data.cpu().numpy())
+
 
 errs = []
 for epoch in range(100):
@@ -118,7 +136,8 @@ for epoch in range(100):
         
         aaa = model(inputStacks=data[0], symmetryStacks=data[2], operations=data[1])
         bbb, ccc = model2(aaa, operations=data[1])
-        err = mse_loss(bbb, data[0], data[3])
+        err = mse_list_loss(bbb, data[0], ccc, data[2])
+        #err = mse_loss(bbb, data[0], data[3])
         model.zero_grad()
         model2.zero_grad()
         err.backward()
