@@ -89,8 +89,8 @@ model2 = GRASSDecoder(config)
 model.apply(encoder_weights_init)
 model2.apply(decoder_weights_init)
 
-optimizer1 = torch.optim.SGD(model.parameters(), lr=3e-2)
-optimizer2 = torch.optim.SGD(model2.parameters(), lr=3e-2)
+optimizer1 = torch.optim.SGD(model.parameters(), lr=5e-2)
+optimizer2 = torch.optim.SGD(model2.parameters(), lr=5e-2)
 
 #model.make_cuda()
 #model2.cuda()
@@ -114,10 +114,11 @@ for i, data in enumerate(dataloader):
 
         #ds = torch.split(bbb, 1, 0)
         showGenshape(torch.cat(bbb[0],0).data.cpu().numpy())
+        err = mse_list_loss(bbb, data[0], ccc, data[2])
 
 
 errs = []
-for epoch in range(100):
+for epoch in range(500):
     if epoch == 60:
         for param_group in optimizer1.param_groups:
             param_group['lr'] = param_group['lr']*0.33
